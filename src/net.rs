@@ -93,19 +93,6 @@ fn receive_packet(tcp_stream: &mut TcpStream) -> Packet {
 		.take(remaining_length)
 		.read_to_end(&mut receive_buffer);
 
-	// match buf_reader.read_to_end(&mut receive_buffer) {
-	// 	Ok(0) => {},
-	// 	Ok(amount) => {
-	// 		println!("received {} bytes", amount);
-	// 		break;
-	// 	},
-	// 	Err(e) => {
-	// 		panic!("uh oh")
-	// 	},
-	// };
-
-	//let packet = Packet::from_bytes(receive_buffer);
-
 	packet::decode(packet_type_byte, receive_buffer)
 }
 

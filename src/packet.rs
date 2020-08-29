@@ -1,13 +1,35 @@
 #[derive(Debug)]
-pub enum PacketType {
+enum PacketVariant {
 	Connect,
-	Connack,
+	Connack(ConnackPacket),
+	Unknown(u8),
 	Test,
 }
 
 #[derive(Debug)]
+struct ConnackPacket {
+	flags: u8,
+	return_code: ConnackReturnCode,
+}
+
+impl ConnackPacket {
+	const TYPE_ID: u8 = 2;
+}
+
+#[derive(Debug)]
+enum ConnackReturnCode {
+	Accepted,
+	UnacceptableProtocolVersion,
+	IdentifierRejected,
+	ServerUnavailable,
+	BadCredentials,
+	NotAuthorized,
+	Unknown(u8),
+}
+
+#[derive(Debug)]
 pub struct Packet {
-	packet_type: PacketType,
+	variant: PacketVariant,
 	body: Vec<u8>,
 }
 
@@ -34,7 +56,7 @@ impl Packet {
 		packet_bytes.append(&mut tail);
 
 		Packet {
-			packet_type: PacketType::Connect,
+			variant: PacketVariant::Connect,
 			body: packet_bytes,
 		}
 	}
@@ -91,9 +113,16 @@ impl Packet {
 		bytes
 	}
 
+	pub fn new_unknown(id: u8, tail: Vec<u8>) -> Self {
+		Self {
+			variant: PacketVariant::Unknown(id),
+			body: tail,
+		}
+	}
+
 	pub fn new_test(values: Vec<u8>) -> Self {
 		Packet {
-			packet_type: PacketType::Test,
+			variant: PacketVariant::Test,
 			body: values,
 		}
 	}
@@ -148,5 +177,38 @@ pub fn encode_variable_int(value: usize) -> Vec<u8> {
 
 pub fn decode(packet_type_byte: u8, tail: Vec<u8>) -> Packet {
 	println!("Decoding {}", packet_type_byte);
-	Packet::new_test(tail)
+
+	let packet_type_id = packet_type_byte >> 4;
+
+	match packet_type_id {
+		ConnackPacket::TYPE_ID => decode_connack(tail),
+		x => Packet::new_unknown(x, tail),
+	}
+}
+
+fn decode_connack(tail: Vec<u8>) -> Packet {
+	let mut bytes = tail.iter();
+
+	let &flag_byte = bytes.next().unwrap();
+	let &return_code_byte = bytes.next().unwrap();
+
+	let return_code = match return_code_byte {
+		0 => ConnackReturnCode::Accepted,
+		1 => ConnackReturnCode::UnacceptableProtocolVersion,
+		2 => ConnackReturnCode::IdentifierRejected,
+		3 => ConnackReturnCode::ServerUnavailable,
+		4 => ConnackReturnCode::BadCredentials,
+		5 => ConnackReturnCode::NotAuthorized,
+		x => ConnackReturnCode::Unknown(x),
+	};
+
+	let fields = ConnackPacket {
+		flags: flag_byte,
+		return_code,
+	};
+
+	Packet {
+		variant: PacketVariant::Connack(fields),
+		body: tail,
+	}
 }
