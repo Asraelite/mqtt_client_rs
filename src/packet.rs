@@ -56,21 +56,22 @@ impl Packet {
 		bytes.push(protocol_level_byte);
 
 		// Connect flags, 1 byte
-		#[allow(unused)]
-		enum ConnectFlag {
-			Username = 0b1000_0000,
-			Password = 0b0100_0000,
-			WillRetain = 0b0010_0000,
-			WillQosLevel1 = 0b0000_1000,
-			WillQosLevel2 = 0b0001_0000,
-			WillFlag = 0b0000_0100,
-			CleanSession = 0b0000_0010,
+		let connect_flags_byte: u8 = {
+			const USERNAME: u8 = 0b1000_0000;
+			const PASSWORD: u8 = 0b0100_0000;
+			const WILL_RETAIN: u8 = 0b0010_0000;
+			const WILL_QOS_LEVEL1: u8 = 0b0000_1000;
+			const WILL_QOS_LEVEL2: u8 = 0b0001_0000;
+			const WILL_FLAG: u8 = 0b0000_0100;
+			const CLEAN_SESSION: u8 = 0b0000_0010;
+
+			0 | CLEAN_SESSION
 		};
-		let connect_flags_byte = 0;
 		bytes.push(connect_flags_byte);
 
 		// Keep alive, 2 bytes
-		let keep_alive_time: u16 = 0xff;
+		//let keep_alive_time: u16 = 0xff;
+		let keep_alive_time: u16 = 60;
 		let keep_alive_time = &keep_alive_time.to_be_bytes();
 		bytes.extend_from_slice(keep_alive_time);
 
@@ -144,10 +145,8 @@ pub fn encode_variable_int(value: usize) -> Vec<u8> {
 	bytes
 }
 
-pub fn decode_variable_int(bytes: Vec<u8>) -> usize {
-	let mut value = 0;
 
-
-
-	5
+pub fn decode(packet_type_byte: u8, tail: Vec<u8>) -> Packet {
+	println!("Decoding {}", packet_type_byte);
+	Packet::new_test(tail)
 }
