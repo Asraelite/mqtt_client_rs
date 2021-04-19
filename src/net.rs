@@ -10,25 +10,25 @@ use crate::packet::{self, Packet};
 
 pub struct ConnectionHandle {
 	pub listen_thread: JoinHandle<()>,
-	outgoing_packet_send: Sender<Packet>,
-	pub incoming_packet_recv: Receiver<Packet>,
+	outgoing_packet_send: Sender<Box<dyn Packet>>,
+	pub incoming_packet_recv: Receiver<Box<dyn Packet>>,
 }
 
 impl ConnectionHandle {
-	pub fn send(&mut self, packet: Packet) {
+	pub fn send(&mut self, packet: Box<dyn Packet>) {
 		self.outgoing_packet_send.send(packet);
 	}
 
-	pub fn receive(&mut self) -> Packet {
+	pub fn receive(&mut self) -> Box<dyn Packet> {
 		self.incoming_packet_recv.recv().unwrap()
 	}
 }
 
-pub fn connect<A: ToSocketAddrs>(address: A) -> ConnectionHandle {
+pub fn connect<'a, A: ToSocketAddrs>(address: A) -> ConnectionHandle {
 	let (mut incoming_packet_send, mut incoming_packet_recv) =
-		channel::<Packet>();
+		channel::<Box<dyn Packet>>();
 	let (mut outgoing_packet_send, mut outgoing_packet_recv) =
-		channel::<Packet>();
+		channel::<Box<dyn Packet>>();
 
 	println!("Attempting TCP connection");
 	let mut tcp_stream = TcpStream::connect(address).unwrap();
@@ -45,11 +45,11 @@ pub fn connect<A: ToSocketAddrs>(address: A) -> ConnectionHandle {
 
 	let _send_thread = std::thread::spawn(move || loop {
 		let outgoing_packet = outgoing_packet_recv.recv().unwrap();
-		let outgoing_bytes = outgoing_packet.to_bytes();
+		let outgoing_bytes = outgoing_packet.bytes();
 
 		println!("Sending {:?}", outgoing_packet);
 
-		tcp_stream.write(outgoing_bytes);
+		tcp_stream.write(outgoing_bytes.as_slice());
 	});
 
 	let listen_thread = std::thread::spawn(move || loop {
@@ -67,7 +67,7 @@ pub fn connect<A: ToSocketAddrs>(address: A) -> ConnectionHandle {
 	}
 }
 
-fn receive_packet(tcp_stream: &mut TcpStream) -> Packet {
+fn receive_packet(tcp_stream: &mut TcpStream) -> Box<dyn Packet> {
 	//let mut bytes = buf_reader.by_ref().bytes();
 
 	let mut receive_buffer = Vec::new();
