@@ -75,8 +75,8 @@ fn receive_packet(
 
 	let mut receive_buffer = Vec::new();
 
-	let packet_type_byte =
-		read_byte(tcp_stream, false)?.ok_or("Could not read from stream")?;
+	let packet_type_byte = read_byte(tcp_stream, false)?
+		.ok_or("Could not read from TCP stream")?;
 
 	let mut remaining_length: u64 = 0;
 	loop {

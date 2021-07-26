@@ -1,19 +1,4 @@
-// #[derive(Debug)]
-// pub struct TestPacket {}
-
-// impl Packet for TestPacket {
-// 	fn variant(&self) -> PacketVariant {
-// 		PacketVariant::Unknown
-// 	}
-
-// 	fn bytes(&self) -> Vec<u8> {
-// 		unimplemented!();
-// 	}
-
-// 	fn decode(tail: Vec<u8>) -> Self {
-// 		unimplemented!();
-// 	}
-// }
+use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub struct UnknownPacket {
@@ -24,7 +9,7 @@ pub struct UnknownPacket {
 impl UnknownPacket {
 	pub fn new(bytes: Vec<u8>) -> Self {
 		Self {
-			type_id: bytes[0],
+			type_id: bytes[0] >> 4,
 			bytes,
 		}
 	}
@@ -51,10 +36,18 @@ pub enum ConnackReturnCode {
 	Unknown(u8),
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum Qos {
+	ZERO,
+	ONE,
+	TWO,
+}
+
 #[derive(Debug)]
 pub enum Packet {
 	Connect(ConnectPacket),
 	Connack(ConnackPacket),
+	Subscribe(SubscribePacket),
 	Unknown(UnknownPacket),
 }
 
@@ -64,6 +57,7 @@ impl Packet {
 		match self {
 			Connect(inner) => inner.bytes(),
 			Connack(inner) => inner.bytes(),
+			Subscribe(inner) => inner.bytes(),
 			Unknown(inner) => inner.bytes().clone(),
 		}
 	}
@@ -80,6 +74,7 @@ impl Packet {
 	}
 }
 
+// TODO: Use username and password in encoding
 #[derive(Debug)]
 pub struct ConnectPacket {
 	pub client_id: Option<String>,
@@ -97,7 +92,7 @@ impl ConnectPacket {
 		let mut packet_bytes = Vec::new();
 
 		// Create tail (variable header + payload)
-		let mut tail = create_connect_packet_tail(&self.client_id);
+		let mut tail = create_connect_packet_tail(&self);
 		let tail_length = tail.len();
 
 		// Create head (fixed header)
@@ -118,7 +113,7 @@ impl ConnectPacket {
 	}
 }
 
-fn create_connect_packet_tail(client_id: &Option<String>) -> Vec<u8> {
+fn create_connect_packet_tail(packet: &ConnectPacket) -> Vec<u8> {
 	let mut bytes = Vec::new();
 
 	// Variable header
@@ -150,7 +145,7 @@ fn create_connect_packet_tail(client_id: &Option<String>) -> Vec<u8> {
 	bytes.push(connect_flags_byte);
 
 	// Keep alive, 2 bytes
-	let keep_alive_time: u16 = 2;
+	let keep_alive_time: u16 = packet.keep_alive;
 	let keep_alive_time = &keep_alive_time.to_be_bytes();
 	bytes.extend_from_slice(keep_alive_time);
 
@@ -158,7 +153,7 @@ fn create_connect_packet_tail(client_id: &Option<String>) -> Vec<u8> {
 
 	let default_client_id = String::from("");
 	// Client ID section
-	let client_id = match client_id {
+	let client_id = match &packet.client_id {
 		Some(x) => x,
 		None => &default_client_id,
 	};
@@ -167,6 +162,98 @@ fn create_connect_packet_tail(client_id: &Option<String>) -> Vec<u8> {
 	let client_id_data = client_id.as_bytes();
 	bytes.extend_from_slice(client_id_length);
 	bytes.extend_from_slice(client_id_data);
+
+	bytes
+}
+
+#[derive(Debug)]
+pub struct SubscribePacket {
+	pub subscriptions: Vec<Subscription>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Subscription {
+	pub topic: String,
+	// TODO: Subscribe options
+}
+
+impl SubscribePacket {
+	fn bytes(&self) -> Vec<u8> {
+		let mut packet_bytes = Vec::new();
+
+		// Create tail (variable header + payload)
+		let mut tail = create_subscribe_packet_tail(&self.subscriptions);
+		let tail_length = tail.len();
+
+		// Create head (fixed header)
+		let packet_type_id = 8;
+		let reserved_bits = 0b0010;
+		let control_packet_type_byte = packet_type_id << 4 | reserved_bits;
+		let mut remaining_length_encoded = encode_variable_int(tail_length);
+
+		// Push head and tail
+		packet_bytes.push(control_packet_type_byte);
+		packet_bytes.append(&mut remaining_length_encoded);
+		packet_bytes.append(&mut tail);
+
+		println!("x: {:?}", packet_bytes);
+
+		packet_bytes
+	}
+
+	fn decode(_tail: Vec<u8>) -> ConnectPacket {
+		unimplemented!();
+	}
+}
+
+fn create_subscribe_packet_tail(subscriptions: &Vec<Subscription>) -> Vec<u8> {
+	let mut bytes = Vec::new();
+
+	// Variable header
+
+	// Packet identifier, 2 bytes
+	// TODO: Make this dynamically assigned. Each subscribe packet must use
+	// currently unused packet identifier. Identifiers become available for
+	// re-use after a suback, puback etc.
+	let packet_identifier: u16 = 1;
+	bytes.extend_from_slice(&mut packet_identifier.to_be_bytes());
+
+	// // Option flags, 1 byte
+	// #[allow(unused)]
+	// let connect_flags_byte: u8 = {
+	// 	const USERNAME: u8 = 0b1000_0000;
+	// 	const PASSWORD: u8 = 0b0100_0000;
+	// 	const WILL_RETAIN: u8 = 0b0010_0000;
+	// 	const WILL_QOS_LEVEL1: u8 = 0b0000_1000;
+	// 	const WILL_QOS_LEVEL2: u8 = 0b0001_0000;
+	// 	const WILL_FLAG: u8 = 0b0000_0100;
+	// 	const CLEAN_SESSION: u8 = 0b0000_0010;
+
+	// 	0 | CLEAN_SESSION
+	// };
+	// bytes.push(connect_flags_byte);
+
+	// // TODO: Properties
+	// let properties_length = 0;
+	// let mut properties_length_encoded = encode_variable_int(properties_length);
+	// bytes.append(&mut properties_length_encoded);
+	// TODO: Why
+
+	// Payload
+
+	for subscription in subscriptions {
+		let topic_length =
+			u16::try_from(subscription.topic.len()).expect(format!(
+				"Subscription topic is too long ({} bytes)",
+				subscription.topic.len(),
+			).as_str());
+		let topic = subscription.topic.as_bytes();
+		// TODO
+		let subscribe_options_bitfield = 2u8;
+		bytes.extend_from_slice(&topic_length.to_be_bytes());
+		bytes.extend_from_slice(&topic);
+		bytes.push(subscribe_options_bitfield);
+	}
 
 	bytes
 }
