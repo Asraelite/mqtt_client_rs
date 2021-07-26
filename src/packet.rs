@@ -1,11 +1,3 @@
-#[derive(Debug)]
-pub enum PacketVariant {
-	Connect,
-	Connack,
-	Unknown,
-	//Test,
-}
-
 // #[derive(Debug)]
 // pub struct TestPacket {}
 
@@ -26,36 +18,26 @@ pub enum PacketVariant {
 #[derive(Debug)]
 pub struct UnknownPacket {
 	type_id: u8,
-	body: Vec<u8>,
+	bytes: Vec<u8>,
 }
 
 impl UnknownPacket {
-	pub fn new(type_id: u8, body: Vec<u8>) -> Self {
+	pub fn new(bytes: Vec<u8>) -> Self {
 		Self {
-			type_id,
-			body,
+			type_id: bytes[0],
+			bytes,
 		}
 	}
-}
 
-impl Packet for UnknownPacket {
-	fn variant(&self) -> PacketVariant {
-		PacketVariant::Unknown
-	}
-
-	fn bytes(&self) -> Vec<u8> {
-		unimplemented!();
-	}
-
-	fn decode(tail: Vec<u8>) -> Self {
-		unimplemented!();
+	pub fn bytes(&self) -> &Vec<u8> {
+		&self.bytes
 	}
 }
 
 #[derive(Debug)]
 pub struct ConnackPacket {
-	flags: u8,
-	return_code: ConnackReturnCode,
+	pub flags: u8,
+	pub return_code: ConnackReturnCode,
 }
 
 #[derive(Debug)]
@@ -69,14 +51,33 @@ pub enum ConnackReturnCode {
 	Unknown(u8),
 }
 
-pub trait Packet: std::fmt::Debug + std::marker::Send + std::marker::Sync {
-	fn variant(&self) -> PacketVariant;
+#[derive(Debug)]
+pub enum Packet {
+	Connect(ConnectPacket),
+	Connack(ConnackPacket),
+	Unknown(UnknownPacket),
+}
 
-	fn bytes(&self) -> Vec<u8>;
+impl Packet {
+	pub fn encode(&self) -> Vec<u8> {
+		use Packet::*;
+		match self {
+			Connect(inner) => inner.bytes(),
+			Connack(inner) => inner.bytes(),
+			Unknown(inner) => inner.bytes().clone(),
+		}
+	}
 
-	fn decode(tail: Vec<u8>) -> Self
-	where
-		Self: Sized;
+	pub fn from_bytes(bytes: Vec<u8>) -> Self {
+		println!("Decoding {}", bytes[0]);
+
+		let packet_type_id = bytes[0] >> 4;
+		let tail = &bytes[1..];
+		match packet_type_id {
+			2 => Packet::Connack(ConnackPacket::decode(tail)),
+			_ => Packet::Unknown(UnknownPacket::new(bytes)),
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -87,11 +88,7 @@ pub struct ConnectPacket {
 	pub keep_alive: u16,
 }
 
-impl Packet for ConnectPacket {
-	fn variant(&self) -> PacketVariant {
-		PacketVariant::Connect
-	}
-
+impl ConnectPacket {
 	fn bytes(&self) -> Vec<u8> {
 		if !client_id_valid(&self.client_id) {
 			panic!("Invalid client ID ({:?})", self.client_id);
@@ -105,7 +102,7 @@ impl Packet for ConnectPacket {
 
 		// Create head (fixed header)
 		let packet_type_id = 1;
-		let control_packet_type_byte = (packet_type_id << 4);
+		let control_packet_type_byte = packet_type_id << 4;
 		let mut remaining_length_encoded = encode_variable_int(tail_length);
 
 		// Push head and tail
@@ -116,7 +113,7 @@ impl Packet for ConnectPacket {
 		packet_bytes
 	}
 
-	fn decode(tail: Vec<u8>) -> ConnectPacket {
+	fn decode(_tail: Vec<u8>) -> ConnectPacket {
 		unimplemented!();
 	}
 }
@@ -138,6 +135,7 @@ fn create_connect_packet_tail(client_id: &Option<String>) -> Vec<u8> {
 	bytes.push(protocol_level_byte);
 
 	// Connect flags, 1 byte
+	#[allow(unused)]
 	let connect_flags_byte: u8 = {
 		const USERNAME: u8 = 0b1000_0000;
 		const PASSWORD: u8 = 0b0100_0000;
@@ -152,8 +150,7 @@ fn create_connect_packet_tail(client_id: &Option<String>) -> Vec<u8> {
 	bytes.push(connect_flags_byte);
 
 	// Keep alive, 2 bytes
-	//let keep_alive_time: u16 = 0xff;
-	let keep_alive_time: u16 = 60;
+	let keep_alive_time: u16 = 2;
 	let keep_alive_time = &keep_alive_time.to_be_bytes();
 	bytes.extend_from_slice(keep_alive_time);
 
@@ -216,28 +213,17 @@ pub fn encode_variable_int(value: usize) -> Vec<u8> {
 	bytes
 }
 
-pub fn decode(packet_type_byte: u8, tail: Vec<u8>) -> Box<dyn Packet> {
-	println!("Decoding {}", packet_type_byte);
-
-	let packet_type_id = packet_type_byte >> 4;
-
-	match packet_type_id {
-		2 => Box::new(ConnackPacket::decode(tail)),
-		x => Box::new(UnknownPacket::new(x, tail)),
-	}
+pub fn decode(bytes: Vec<u8>) -> Packet {
+	Packet::from_bytes(bytes)
 }
 
-impl Packet for ConnackPacket {
-	fn variant(&self) -> PacketVariant {
-		PacketVariant::Connect
-	}
-
+impl ConnackPacket {
 	fn bytes(&self) -> Vec<u8> {
 		unimplemented!();
 	}
 
-	fn decode(tail: Vec<u8>) -> Self {
-		let mut bytes = tail.iter();
+	fn decode<B: AsRef<[u8]>>(tail: B) -> Self {
+		let mut bytes = tail.as_ref().iter();
 
 		let &flag_byte = bytes.next().unwrap();
 		let &return_code_byte = bytes.next().unwrap();
