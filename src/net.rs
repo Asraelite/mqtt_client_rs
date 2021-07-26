@@ -109,7 +109,6 @@ fn read_byte(
 	let mut buffer = [0u8];
 
 	loop {
-		println!("read");
 		match tcp_stream.read(&mut buffer).unwrap() {
 			0 if block == true => continue,
 			0 if block == false => return Ok(None),

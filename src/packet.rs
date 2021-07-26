@@ -2,8 +2,8 @@ use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub struct UnknownPacket {
-	type_id: u8,
-	bytes: Vec<u8>,
+	pub type_id: u8,
+	pub bytes: Vec<u8>,
 }
 
 impl UnknownPacket {
@@ -17,6 +17,12 @@ impl UnknownPacket {
 	pub fn bytes(&self) -> &Vec<u8> {
 		&self.bytes
 	}
+}
+
+#[derive(Debug)]
+pub struct PublishPacket {
+	pub size: usize,
+	pub message: String,
 }
 
 #[derive(Debug)]
@@ -48,6 +54,7 @@ pub enum Packet {
 	Connect(ConnectPacket),
 	Connack(ConnackPacket),
 	Subscribe(SubscribePacket),
+	Publish(PublishPacket),
 	Unknown(UnknownPacket),
 }
 
@@ -58,17 +65,17 @@ impl Packet {
 			Connect(inner) => inner.bytes(),
 			Connack(inner) => inner.bytes(),
 			Subscribe(inner) => inner.bytes(),
+			Publish(_inner) => unimplemented!(),
 			Unknown(inner) => inner.bytes().clone(),
 		}
 	}
 
 	pub fn from_bytes(bytes: Vec<u8>) -> Self {
-		println!("Decoding {}", bytes[0]);
-
 		let packet_type_id = bytes[0] >> 4;
 		let tail = &bytes[1..];
 		match packet_type_id {
 			2 => Packet::Connack(ConnackPacket::decode(tail)),
+			3 => Packet::Publish(PublishPacket::decode(tail)),
 			_ => Packet::Unknown(UnknownPacket::new(bytes)),
 		}
 	}
@@ -196,8 +203,6 @@ impl SubscribePacket {
 		packet_bytes.append(&mut remaining_length_encoded);
 		packet_bytes.append(&mut tail);
 
-		println!("x: {:?}", packet_bytes);
-
 		packet_bytes
 	}
 
@@ -242,14 +247,16 @@ fn create_subscribe_packet_tail(subscriptions: &Vec<Subscription>) -> Vec<u8> {
 	// Payload
 
 	for subscription in subscriptions {
-		let topic_length =
-			u16::try_from(subscription.topic.len()).expect(format!(
+		let topic_length = u16::try_from(subscription.topic.len()).expect(
+			format!(
 				"Subscription topic is too long ({} bytes)",
 				subscription.topic.len(),
-			).as_str());
+			)
+			.as_str(),
+		);
 		let topic = subscription.topic.as_bytes();
 		// TODO
-		let subscribe_options_bitfield = 2u8;
+		let subscribe_options_bitfield = 0u8;
 		bytes.extend_from_slice(&topic_length.to_be_bytes());
 		bytes.extend_from_slice(&topic);
 		bytes.push(subscribe_options_bitfield);
@@ -328,6 +335,21 @@ impl ConnackPacket {
 		ConnackPacket {
 			flags: flag_byte,
 			return_code,
+		}
+	}
+}
+
+impl PublishPacket {
+	fn decode<B: AsRef<[u8]>>(tail: B) -> Self {
+		let bytes = tail.as_ref();
+
+		let size = bytes.len();
+		let end = if size > 300 { 300 } else { size };
+		let message = String::from_utf8_lossy(&bytes[..end]);
+
+		PublishPacket {
+			size,
+			message: message.to_string(),
 		}
 	}
 }

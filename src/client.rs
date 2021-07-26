@@ -2,6 +2,7 @@ use crate::net::{self, ConnectionHandle};
 #[allow(unused)]
 use crate::packet::{
 	self, ConnackPacket, ConnectPacket, Packet, SubscribePacket, Subscription,
+	UnknownPacket,
 };
 
 pub struct Client {
@@ -49,11 +50,20 @@ impl Client {
 		let subscribe_packet = Packet::Subscribe(subscribe_packet);
 		self.connection.send(subscribe_packet);
 
-		self.connection.receive().unwrap();
-		self.connection.receive().unwrap();
+		let response = self.connection.receive();
+		match response {
+			Ok(Packet::Unknown(UnknownPacket { type_id: 9, .. })) => {}
+			e => panic!("Failed to subscribe: {:?}", e),
+		}
 	}
 
 	pub fn receive(&mut self) -> Packet {
 		self.connection.receive().unwrap()
+	}
+
+	pub fn listen(&mut self) -> ! {
+		loop {
+			self.connection.receive().unwrap();
+		}
 	}
 }

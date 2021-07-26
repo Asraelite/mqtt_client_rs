@@ -10,4 +10,5 @@ fn main() {
 	let mut client = Client::connect();
 
 	client.subscribe("a");
+	client.listen();
 }
